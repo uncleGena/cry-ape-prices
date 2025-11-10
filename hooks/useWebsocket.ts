@@ -1,3 +1,4 @@
+import { BinanceCandleMessage, ServerMessage } from "@/types/binance";
 import { useEffect, useRef, useState } from "react";
 
 type SocketMessage = {
@@ -10,6 +11,7 @@ type SocketMessage = {
 let activeInstances = 0;
 
 export function useWebsocket() {
+  const [candles, setCandles] = useState<BinanceCandleMessage[]>([]);
   const [connectionState, setConnectionState] = useState(
     "connecting" as "connecting" | "open" | "closed" | "error"
   );
@@ -55,14 +57,6 @@ export function useWebsocket() {
 
         console.log("WebSocket opened");
         setConnectionState("open");
-
-        const helloMessage: SocketMessage = {
-          type: "client-hello",
-          message: "Client connected",
-          timestamp: new Date().toISOString(),
-        };
-
-        socket?.send(JSON.stringify(helloMessage));
       });
 
       socket.addEventListener("message", (event) => {
@@ -71,10 +65,15 @@ export function useWebsocket() {
         }
 
         try {
-          const parsed = JSON.parse(event.data) as SocketMessage;
-          console.log("Received message:", parsed);
-        } catch {
-          console.log("Received non-JSON message:", event.data);
+          const parsed = JSON.parse(event.data) as ServerMessage;
+          if (parsed.type === "binance-candle") {
+            setCandles((prev) => {
+              const next = [...prev, parsed];
+              return next.slice(-200);
+            });
+          }
+        } catch (error) {
+          console.warn("Failed to parse WebSocket message", error);
         }
       });
 
@@ -102,7 +101,7 @@ export function useWebsocket() {
         socketRef.current = null;
       }
       socket?.close();
-      activeInstances = Math.max(0, activeInstances - 1);
+      activeInstances = 0;
     };
   }, []);
 
