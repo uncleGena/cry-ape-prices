@@ -1,0 +1,31 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - "-t"
+      - "$_IMAGE"
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - "$_IMAGE"
+  - name: gcr.io/cloud-builders/gcloud
+    args:
+      - run
+      - deploy
+      - cry-ape-prices
+      - "--image"
+      - "$_IMAGE"
+      - "--region"
+      - europe-west1
+      - "--platform"
+      - managed
+      - "--allow-unauthenticated"
+      - "--min-instances"
+      - "1"
+      - "--update-secrets"
+      - NEXT_ENV_BINANCE_KEY=NEXT_ENV_BINANCE_KEY:latest,NEXT_ENV_BINANCE_SECRET=NEXT_ENV_BINANCE_SECRET:latest
+substitutions:
+  _IMAGE: europe-west1-docker.pkg.dev/cry-ape-prices/cry-ape-prices/web:latest
+images:
+  - "$_IMAGE"

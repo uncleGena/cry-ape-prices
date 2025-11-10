@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactElement, useEffect, useMemo, useRef } from "react";
+import { ReactElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   CandlestickSeries as CandlestickSeriesDefinition,
   ColorType,
@@ -79,6 +79,8 @@ const CandlestickChart = ({ candles, symbol = "BTCUSDT", interval = "1m", icons 
   const chartRef = useRef<ChartApi | null>(null);
   const seriesRef = useRef<CandlestickSeriesApi | null>(null);
   const initialisedRef = useRef(false);
+  const [chartVisible, setChartVisible] = useState(false);
+
 
   const [baseIcon, quoteIcon] = icons ?? [];
 
@@ -105,6 +107,8 @@ const CandlestickChart = ({ candles, symbol = "BTCUSDT", interval = "1m", icons 
       })
       .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
   }, [candles]);
+
+  const hasCandles = seriesData.length > 0;
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -183,22 +187,49 @@ const CandlestickChart = ({ candles, symbol = "BTCUSDT", interval = "1m", icons 
     }
   }, [seriesData]);
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setChartVisible(hasCandles);
+    }, hasCandles ? 500 : 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [hasCandles]);
+
   return (
-    <div className="w-full overflow-hidden rounded-lg border border-slate-700 bg-slate-900/70 p-0">
-      <div className="p-4">
-        <header className="mb-3 flex items-center justify-between text-sm text-slate-300">
-          <span className="font-semibold tracking-wide text-slate-100">{symbol}</span>
-          <span>{interval}</span>
-        </header>
-        <div ref={containerRef} className="h-96 w-full">
-          {seriesData.length === 0 && (
-            <div className="flex h-full items-center justify-center text-sm text-slate-400">
-              Waiting for market data...
+    <div className="w-full overflow-hidden rounded-lg border border-slate-700 bg-[#0f172a]">
+      <div className="relative h-96 overflow-hidden">
+        <motion.div
+          className="absolute inset-0 flex flex-col"
+          initial={{ y: "-100%" }}
+          animate={{ y: chartVisible ? "0%" : "-100%" }}
+          transition={{ duration: 0.3, ease: "easeInOut" }}
+        >
+          <div className="flex h-full flex-col p-4">
+            <header className="mb-3 flex items-center justify-between text-sm text-slate-300">
+              <span className="font-semibold tracking-wide text-slate-100">{symbol}</span>
+              <span>{interval}</span>
+            </header>
+            <div ref={containerRef} className="min-h-0 flex-1 w-full overflow-hidden">
+              {seriesData.length === 0 && (
+                <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                  Waiting for market data...
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        </motion.div>
+        <motion.div
+          className="absolute inset-0"
+          initial={{ opacity: 0, y: "0%" }}
+          animate={{ opacity: chartVisible ? 0 : 1, y: chartVisible ? "100%" : "0%" }}
+          transition={{
+            opacity: { duration: 0.1, ease: "easeOut" },
+            y: { duration: 0.3, ease: "easeInOut" },
+          }}
+        >
+          <TokenPairAnimation baseIcon={baseIcon} quoteIcon={quoteIcon} className="h-full" />
+        </motion.div>
       </div>
-      <TokenPairAnimation baseIcon={baseIcon} quoteIcon={quoteIcon} className="h-96" />
     </div>
   );
 };
