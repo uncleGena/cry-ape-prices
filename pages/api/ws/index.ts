@@ -5,10 +5,16 @@ import type { IncomingMessage } from "http";
 import type { Socket } from "net";
 import Binance from "node-binance-api";
 
-import type { BinanceCandleMessage, CandlestickData, ServerInfoMessage } from "@/types/binance";
+import type {
+  BinanceCandleMessage,
+  BinanceHistoryMessage,
+  CandlestickData,
+  ServerInfoMessage,
+} from "@/types/binance";
 
 const BINANCE_SYMBOLS = ["BTCUSDT", "SOLUSDT"] as const;
 const BINANCE_INTERVAL = "1m";
+const HISTORY_LIMIT = 30;
 
 const formatServerMessage = (type: ServerInfoMessage["type"], message: string) =>
   JSON.stringify({ type, message, timestamp: new Date().toISOString() });
@@ -25,6 +31,7 @@ let globalWss: WebSocketServer | null = null;
 let binanceClient: Binance | null = null;
 let binanceStreamActive = false;
 const sockets = new Set<WebSocket>();
+const historyCache = new Map<string, CandlestickData[]>();
 
 const ensureBinanceClient = (): Binance => {
   if (binanceClient) {
@@ -60,6 +67,32 @@ const broadcast = (message: BinanceCandleMessage | ServerInfoMessage) => {
   });
 };
 
+const updateHistory = (symbol: string, candle: CandlestickData) => {
+  const existing = historyCache.get(symbol) ?? [];
+  const index = existing.findIndex((item) => item.t === candle.t);
+  let updated: CandlestickData[];
+
+  if (index >= 0) {
+    // replace the existing candle with the same open time.
+    updated = [...existing];
+    updated[index] = candle;
+  } else {
+    // append the new candle while keeping the array immutable.
+    updated = [...existing, candle];
+  }
+
+  // ensure candles remain sorted by open time.
+  updated.sort((a, b) => a.t - b.t);
+
+  if (updated.length > HISTORY_LIMIT) {
+    // truncate to the newest HISTORY_LIMIT candles.
+    updated = updated.slice(updated.length - HISTORY_LIMIT);
+  }
+
+  historyCache.set(symbol, updated);
+  return updated;
+};
+
 const ensureBinanceStream = () => {
   if (binanceStreamActive) {
     return;
@@ -77,6 +110,7 @@ const ensureBinanceStream = () => {
       }
 
       const candle = mapWsKlineToCandlestick(symbol, kline);
+      updateHistory(symbol, candle);
       const message: BinanceCandleMessage = {
         type: "binance-candle",
         symbol,
@@ -103,25 +137,41 @@ const sendInitialCandles = async (socket: WebSocket) => {
   try {
     const client = ensureBinanceClient();
     for (const symbol of BINANCE_SYMBOLS) {
-      const klines = (await client.candlesticks(symbol, BINANCE_INTERVAL, { limit: 1 })) as unknown;
-      const latest = Array.isArray(klines) ? klines[0] : klines;
+      let history = historyCache.get(symbol);
 
-      if (!latest) {
-        continue;
+      if (!history || history.length === 0) {
+        const klines = (await client.candlesticks(symbol, BINANCE_INTERVAL, {
+          limit: HISTORY_LIMIT,
+        })) as unknown;
+
+        if (Array.isArray(klines)) {
+          history = klines
+            .map((entry) => mapRestCandlestick(symbol, entry))
+            .sort((a, b) => a.t - b.t);
+        } else if (klines) {
+          history = [mapRestCandlestick(symbol, klines)];
+        } else {
+          history = [];
+        }
+
+        if (history.length > 0) {
+          history = history.slice(-HISTORY_LIMIT);
+          historyCache.set(symbol, history);
+        }
       }
 
-      const candle = mapRestCandlestick(symbol, latest);
-      console.log(candle);
-      const message: BinanceCandleMessage = {
-        type: "binance-candle",
+      if (!history || history.length === 0) continue;
+
+      const historyMessage: BinanceHistoryMessage = {
+        type: "binance-history",
         symbol,
         interval: BINANCE_INTERVAL,
-        candle,
+        candles: history.slice(),
         timestamp: new Date().toISOString(),
       };
 
       if (socket.readyState === socket.OPEN) {
-        socket.send(JSON.stringify(message));
+        socket.send(JSON.stringify(historyMessage));
       }
     }
   } catch (error) {

@@ -8,7 +8,7 @@ import { IconContext } from "react-icons";
  */
 export function Providers({ children }: PropsWithChildren) {
   return (
-    <IconContext.Provider value={{ color: "red", className: "text-2xl" }}>
+    <IconContext.Provider value={{ className: "text-2xl" }}>
       {children}
     </IconContext.Provider>
   );

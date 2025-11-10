@@ -1,5 +1,9 @@
-import { BinanceCandleMessage, ServerMessage } from "@/types/binance";
-import { useEffect, useRef, useState } from "react";
+import { 
+  BinanceCandleMessage, 
+  CandlestickData as BinanceCandlestick, 
+  ServerMessage
+} from "@/types/binance";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type SocketMessage = {
   type: string;
@@ -10,12 +14,14 @@ type SocketMessage = {
 // Track active instances to enforce singleton usage
 let activeInstances = 0;
 
+const HISTORY_LIMIT = 30;
+
 export function useWebsocket() {
-  const [candles, setCandles] = useState<BinanceCandleMessage[]>([]);
+  const [historyBySymbol, setHistoryBySymbol] = useState<Record<string, BinanceCandlestick[]>>({});
+  const [feed, setFeed] = useState<BinanceCandleMessage[]>([]);
   const [connectionState, setConnectionState] = useState(
     "connecting" as "connecting" | "open" | "closed" | "error"
   );
-  
   const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -66,10 +72,41 @@ export function useWebsocket() {
 
         try {
           const parsed = JSON.parse(event.data) as ServerMessage;
-          if (parsed.type === "binance-candle") {
-            setCandles((prev) => {
-              const next = [...prev, parsed];
+          if (parsed.type === "binance-history") {
+            const { symbol, candles } = parsed;
+            setHistoryBySymbol((prev) => ({
+              ...prev,
+              [symbol]: [...candles].sort((a, b) => a.t - b.t),
+            }));
+          } else if (parsed.type === "binance-candle") {
+            const message = parsed;
+            setFeed((prev) => {
+              const next = [...prev, message];
               return next.slice(-200);
+            });
+
+            setHistoryBySymbol((prev) => {
+              const current = prev[message.symbol] ?? [];
+              const index = current.findIndex((item) => item.t === message.candle.t);
+              let updated: BinanceCandlestick[];
+
+              if (index >= 0) {
+                updated = [...current];
+                updated[index] = message.candle;
+              } else {
+                updated = [...current, message.candle];
+              }
+
+              updated.sort((a, b) => a.t - b.t);
+
+              if (updated.length > HISTORY_LIMIT) {
+                updated = updated.slice(updated.length - HISTORY_LIMIT);
+              }
+
+              return {
+                ...prev,
+                [message.symbol]: updated,
+              };
             });
           }
         } catch (error) {
@@ -105,7 +142,21 @@ export function useWebsocket() {
     };
   }, []);
 
+  const latestBySymbol = useMemo(() => {
+    const grouped = new Map<string, BinanceCandlestick>();
+    Object.entries(historyBySymbol).forEach(([symbol, series]) => {
+      const latest = series[series.length - 1];
+      if (latest) {
+        grouped.set(symbol, latest);
+      }
+    });
+    return grouped;
+  }, [historyBySymbol]);
+
   return {
     connectionState,
+    latestBySymbol,
+    historyBySymbol,
+    feed,
   }
 }

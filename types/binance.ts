@@ -26,10 +26,18 @@ export type BinanceCandleMessage = {
   timestamp: string;
 };
 
+export type BinanceHistoryMessage = {
+  type: "binance-history";
+  symbol: string;
+  interval: string;
+  candles: CandlestickData[];
+  timestamp: string;
+};
+
 export type ServerInfoMessage = {
   type: "server-info" | "server-heartbeat" | "server-error";
   message: string;
   timestamp: string;
 };
 
-export type ServerMessage = BinanceCandleMessage | ServerInfoMessage;
+export type ServerMessage = BinanceCandleMessage | BinanceHistoryMessage | ServerInfoMessage;
